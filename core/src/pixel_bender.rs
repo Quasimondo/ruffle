@@ -6,7 +6,31 @@ use crate::{
     string::AvmString,
 };
 
+/// This trait provides methods for converting between PixelBender types and AVM2 values.
+/// PixelBender is a domain-specific language for image processing, and its types need to be
+/// representable in the AVM2 (ActionScript Virtual Machine 2) environment.
 pub trait PixelBenderTypeExt {
+    /// Converts an AVM2 `Value` into a `PixelBenderType`.
+    ///
+    /// This method takes an AVM2 `Value`, which can represent various ActionScript types like
+    /// Number, int, String, or Array, and attempts to convert it into a specific `PixelBenderType`
+    /// based on the provided `kind` (PixelBenderTypeOpcode).
+    ///
+    /// For example, if `kind` is `TFloat`, this method will try to coerce the AVM2 `value`
+    /// into a floating-point number and return it as `PixelBenderType::TFloat`. If the `value`
+    /// is an Array, it will be converted into vector or matrix types (e.g., TFloat2, TFloat3x3)
+    /// based on the `kind`.
+    ///
+    /// # Arguments
+    ///
+    /// * `activation`: A mutable reference to the AVM2 `Activation` environment.
+    /// * `value`: The AVM2 `Value` to convert.
+    /// * `kind`: The `PixelBenderTypeOpcode` indicating the target PixelBender type.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the converted `PixelBenderType` on success, or an `Error`
+    /// if the conversion is not possible or an unexpected type is encountered.
     fn from_avm2_value<'gc>(
         activation: &mut Activation<'_, 'gc>,
         value: Value<'gc>,
@@ -15,6 +39,31 @@ pub trait PixelBenderTypeExt {
     where
         Self: Sized;
 
+    /// Converts a `PixelBenderType` into an AVM2 `Value`.
+    ///
+    /// This method takes a `PixelBenderType` and converts it into an AVM2 `Value` that can be
+    /// used within the ActionScript environment.
+    ///
+    /// For scalar types like `TString`, `TInt`, or `TFloat`, it returns a corresponding AVM2
+    /// String, int, or Number. For vector or matrix types (e.g., `TFloat2`, `TFloat3x3`),
+    /// it returns an AVM2 Array containing the elements.
+    ///
+    /// The `tint_as_int` parameter controls how `PixelBenderType::TInt` is represented. If `true`,
+    /// it's returned as an AVM2 `int`. Otherwise, it's wrapped in an Array, similar to other
+    /// vector types. Floating-point numbers with no fractional part may be converted to AVM2 `int`
+    /// for compatibility with Flash behavior.
+    ///
+    /// # Arguments
+    ///
+    /// * `activation`: A mutable reference to the AVM2 `Activation` environment.
+    /// * `tint_as_int`: A boolean flag that, if true, causes `PixelBenderType::TInt` to be
+    ///   returned as a direct AVM2 `int` value. If false, `TInt` is returned as an Array
+    ///   containing a single integer.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the converted AVM2 `Value` on success, or an `Error` if
+    /// an issue occurs during conversion.
     fn as_avm2_value<'gc>(
         &self,
         activation: &mut Activation<'_, 'gc>,
@@ -22,7 +71,23 @@ pub trait PixelBenderTypeExt {
     ) -> Result<Value<'gc>, Error<'gc>>;
 }
 
+/// Implements the `PixelBenderTypeExt` trait for the `PixelBenderType` enum.
+/// This allows direct conversion between `PixelBenderType` variants and AVM2 `Value`s.
 impl PixelBenderTypeExt for PixelBenderType {
+    /// Converts an AVM2 `Value` to a specific `PixelBenderType` variant.
+    ///
+    /// This implementation handles the following conversions:
+    /// - AVM2 `String` to `PixelBenderType::TString`.
+    /// - AVM2 `Number` to `PixelBenderType::TFloat`.
+    /// - AVM2 `Integer` to `PixelBenderType::TInt`.
+    /// - AVM2 `Array` to various `PixelBenderType` vector and matrix types (e.g., `TFloat2`, `TInt4`, `TFloat3x3`),
+    ///   based on the `kind` parameter. The elements of the array are coerced to numbers (for float types)
+    ///   or integers (for int types).
+    ///
+    /// Panics if an unexpected AVM2 `value` type is provided for the given `kind`, or if an AVM2 `Object`
+    /// that is not an `Array` is encountered when a vector or matrix type is expected.
+    /// It also panics if an array has holes or if the number of elements in the array does not match
+    /// the expected size for the given `kind`.
     fn from_avm2_value<'gc>(
         activation: &mut Activation<'_, 'gc>,
         value: Value<'gc>,
@@ -119,6 +184,24 @@ impl PixelBenderTypeExt for PixelBenderType {
             _ => panic!("Unexpected value {value:?}"),
         }
     }
+
+    /// Converts a `PixelBenderType` variant to an AVM2 `Value`.
+    ///
+    /// This implementation handles the following conversions:
+    /// - `PixelBenderType::TString` to AVM2 `String`.
+    /// - `PixelBenderType::TInt`:
+    ///     - If `tint_as_int` is `true`, converts to an AVM2 `Integer`.
+    ///     - If `tint_as_int` is `false`, converts to an AVM2 `Array` containing a single integer.
+    /// - `PixelBenderType::TFloat` to an AVM2 `Number`. If the float has no fractional part,
+    ///   it's converted to an AVM2 `Integer` (emulating Flash behavior).
+    /// - Vector types (`TFloat2`, `TFloat3`, `TFloat4`, `TInt2`, `TInt3`, `TInt4`) to an AVM2 `Array`
+    ///   of numbers or integers. Floats with no fractional parts are converted to integers.
+    /// - Matrix types (`TFloat2x2`, `TFloat3x3`, `TFloat4x4`) to an AVM2 `Array` of numbers,
+    ///   representing the matrix elements in row-major order. Floats with no fractional parts
+    ///   are converted to integers.
+    ///
+    /// The conversion of floats to integers when there's no fractional part is done to match
+    /// the behavior observed in the Flash Player.
     fn as_avm2_value<'gc>(
         &self,
         activation: &mut Activation<'_, 'gc>,
