@@ -63,6 +63,8 @@ The following are typical dependencies for Linux:
 * libudev-dev
 * default-jre-headless
 * g++
+* libv4l-dev (for webcam support)
+* clang and libclang-dev (may be required for some features like webcam support, or if building certain `*-sys` crates)
 
 ### Desktop
 

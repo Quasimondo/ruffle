@@ -781,16 +781,21 @@ pub fn init_native_system_classes(activation: &mut Activation<'_, '_>) {
             // our Rust create_class might augment it or use it as a base.
             // For now, our create_class defines it from scratch, assuming EventDispatcher exists.
             // This part might need refinement if AS3 Camera has significant init logic.
-            super::flash::media::camera::create_class(activation)
+            flash::media::camera::create_class(activation).expect("Failed to create flash.media.Camera class (with AS3 class)")
         }
         None => {
             // No AS3 Camera class found, create purely from Rust.
-            super::flash::media::camera::create_class(activation)
+            flash::media::camera::create_class(activation).expect("Failed to create flash.media.Camera class (purely Rust)")
         }
     };
     // Ensure the class is also in the domain if it's not already.
     // This makes it findable by `getDefinitionByName("flash.media.Camera")`
-    let camera_qname = QName::new(Namespace::package("flash.media"), "Camera");
+    let package_name_camera = AvmString::new_utf8(activation.context.gc_context, "flash.media");
+    let class_name_camera = AvmString::new_utf8(activation.context.gc_context, "Camera");
+    let camera_qname = QName::new(
+        Namespace::package(package_name_camera, activation.avm2().api_version(), &mut activation.context.avm2_context_mut().strings),
+        class_name_camera
+    );
     activation.domain().export_class(camera_qname, camera_class.inner_class_definition(), activation.context.gc_context);
 
 

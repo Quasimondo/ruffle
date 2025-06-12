@@ -35,7 +35,6 @@ use core::fmt;
 use gc_arena::barrier::unlock;
 use gc_arena::{Collect, Gc, Lock, Mutation, RefLock};
 use ruffle_macros::istr;
-use ruffle_render::commands::Command as RenderCommand;
 use ruffle_render::commands::CommandHandler;
 use ruffle_render::quality::StageQuality;
 use ruffle_render::transform::Transform;
@@ -1101,9 +1100,9 @@ impl<'gc> EditText<'gc> {
     /// Render lines according to the given procedure.
     ///
     /// This skips invisible lines.
-    fn render_lines<F>(self, context: &mut RenderContext<'_, 'gc>, mut f: F)
+    fn render_lines<F>(self, context: &mut RenderContext<'_, 'gc>, f: F)
     where
-        F: FnMut(&mut RenderContext<'_, 'gc>, &LayoutLine<'gc>),
+        F: Fn(&mut RenderContext<'_, 'gc>, &LayoutLine<'gc>),
     {
         // Skip lines that are off-screen.
         let lines_to_skip = self.scroll().saturating_sub(1);
@@ -1113,14 +1112,10 @@ impl<'gc> EditText<'gc> {
     }
 
     /// Render the visible text along with selection and the caret.
-    fn render_text(
-        self,
-        context: &mut RenderContext<'_, 'gc>,
-        render_state: &mut EditTextRenderState,
-    ) {
+    fn render_text(self, context: &mut RenderContext<'_, 'gc>) {
         self.render_selection_background(context);
         self.render_lines(context, |context, line| {
-            self.render_layout_line(context, line, render_state);
+            self.render_layout_line(context, line);
         });
     }
 
@@ -1192,24 +1187,14 @@ impl<'gc> EditText<'gc> {
         context.commands.draw_rect(color, selection_box);
     }
 
-    fn render_layout_line(
-        self,
-        context: &mut RenderContext<'_, 'gc>,
-        line: &LayoutLine<'gc>,
-        render_state: &mut EditTextRenderState,
-    ) {
+    fn render_layout_line(self, context: &mut RenderContext<'_, 'gc>, line: &LayoutLine<'gc>) {
         for layout_box in line.boxes_iter() {
-            self.render_layout_box(context, layout_box, render_state);
+            self.render_layout_box(context, layout_box);
         }
     }
 
     /// Render a layout box, plus its children.
-    fn render_layout_box(
-        self,
-        context: &mut RenderContext<'_, 'gc>,
-        lbox: &LayoutBox<'gc>,
-        render_state: &mut EditTextRenderState,
-    ) {
+    fn render_layout_box(self, context: &mut RenderContext<'_, 'gc>, lbox: &LayoutBox<'gc>) {
         let origin = lbox.bounds().origin();
 
         // If text's top is under the textbox's bottom, skip drawing.
@@ -1308,7 +1293,7 @@ impl<'gc> EditText<'gc> {
             );
 
             if caret.is_some() {
-                self.render_caret(context, caret_x, caret_height, color, render_state);
+                self.render_caret(context, caret_x, caret_height, color);
             }
         }
 
@@ -1325,7 +1310,6 @@ impl<'gc> EditText<'gc> {
         x: Twips,
         height: Twips,
         color: Color,
-        render_state: &mut EditTextRenderState,
     ) {
         let mut caret = context.transform_stack.transform().matrix
             * Matrix::create_box_with_rotation(
@@ -1337,12 +1321,7 @@ impl<'gc> EditText<'gc> {
             );
         let pixel_snapping = EditTextPixelSnapping::new(context.stage.quality());
         pixel_snapping.apply(&mut caret);
-
-        // We have to draw the caret outside of the text mask.
-        render_state.draw_caret_command = Some(RenderCommand::DrawLine {
-            color,
-            matrix: caret,
-        });
+        context.commands.draw_line(color, caret);
     }
 
     /// Attempts to bind this text field to a property of a display object.
@@ -2702,10 +2681,7 @@ impl<'gc> TDisplayObject<'gc> for EditText<'gc> {
         }
 
         context.commands.push_mask();
-
-        let mask_bounds = self.0.bounds.get().grow_x(-Self::GUTTER);
-        let mask = Matrix::create_box_from_rectangle(&mask_bounds);
-
+        let mask = Matrix::create_box_from_rectangle(&self.0.bounds.get());
         context.commands.draw_rect(
             Color::WHITE,
             context.transform_stack.transform().matrix * mask,
@@ -2717,8 +2693,7 @@ impl<'gc> TDisplayObject<'gc> for EditText<'gc> {
             ..Default::default()
         });
 
-        let mut render_state = Default::default();
-        self.render_text(context, &mut render_state);
+        self.render_text(context);
 
         self.render_debug_boxes(
             context,
@@ -2734,10 +2709,6 @@ impl<'gc> TDisplayObject<'gc> for EditText<'gc> {
             context.transform_stack.transform().matrix * mask,
         );
         context.commands.pop_mask();
-
-        if let Some(draw_caret_command) = render_state.draw_caret_command {
-            context.commands.commands.push(draw_caret_command);
-        }
     }
 
     fn allow_as_mask(&self) -> bool {
@@ -3643,11 +3614,4 @@ struct ImeData {
     ime_start: usize,
     ime_end: usize,
     text: String,
-}
-
-#[derive(Clone, Debug, Default)]
-struct EditTextRenderState {
-    /// Used for delaying rendering the caret, so that it's
-    /// rendered outside of the text mask.
-    draw_caret_command: Option<RenderCommand>,
 }
