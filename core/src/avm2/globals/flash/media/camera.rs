@@ -11,7 +11,9 @@ use crate::avm2::string::AvmString;
 use crate::avm2::api_version::ApiVersion; // Needed for Namespace::package
 
 #[cfg(target_os = "linux")]
-use v4l::{Device, capability::Flags as CapFlags, Error as V4lError};
+use v4l::{Device, capability::Flags as CapFlags};
+#[cfg(target_os = "linux")]
+use v4l::error::Error as V4lError;
 #[cfg(target_os = "linux")]
 use tracing::{warn, info};
 
