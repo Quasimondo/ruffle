@@ -115,6 +115,7 @@ pub struct SystemClasses<'gc> {
     pub perspectiveprojection: ClassObject<'gc>,
     pub illegaloperationerror: ClassObject<'gc>,
     pub eventdispatcher: ClassObject<'gc>,
+    pub camera: ClassObject<'gc>, // Added Camera
     pub rectangle: ClassObject<'gc>,
     pub keyboardevent: ClassObject<'gc>,
     pub point: ClassObject<'gc>,
@@ -278,6 +279,7 @@ impl<'gc> SystemClasses<'gc> {
             perspectiveprojection: object,
             illegaloperationerror: object,
             eventdispatcher: object,
+            camera: object, // Added Camera
             rectangle: object,
             keyboardevent: object,
             point: object,
@@ -687,6 +689,7 @@ pub fn init_native_system_classes(activation: &mut Activation<'_, '_>) {
             ("flash.events", "AsyncErrorEvent", asyncerrorevent),
             ("flash.events", "ContextMenuEvent", contextmenuevent),
             ("flash.events", "FocusEvent", focusevent),
+            // Note: Camera is initialized manually below, after EventDispatcher.
             ("flash.geom", "Matrix", matrix),
             ("flash.geom", "Matrix3D", matrix3d),
             ("flash.geom", "PerspectiveProjection", perspectiveprojection),
@@ -764,6 +767,34 @@ pub fn init_native_system_classes(activation: &mut Activation<'_, '_>) {
             ("flash.ui", "ContextMenuItem", contextmenuitem),
         ]
     );
+
+    // Manually initialize Camera class after EventDispatcher is available.
+    let camera_class = match activation.avm2().playerglobals_domain.get_class(
+        activation.context,
+        &Multiname::new(
+            Namespace::package("flash.media", ApiVersion::VM_INTERNAL, activation.strings()),
+            "Camera",
+        ),
+    ) {
+        Some(as3_class) => {
+            // If an AS3 Camera class exists (e.g. from playerglobals.swf),
+            // our Rust create_class might augment it or use it as a base.
+            // For now, our create_class defines it from scratch, assuming EventDispatcher exists.
+            // This part might need refinement if AS3 Camera has significant init logic.
+            super::flash::media::camera::create_class(activation)
+        }
+        None => {
+            // No AS3 Camera class found, create purely from Rust.
+            super::flash::media::camera::create_class(activation)
+        }
+    };
+    // Ensure the class is also in the domain if it's not already.
+    // This makes it findable by `getDefinitionByName("flash.media.Camera")`
+    let camera_qname = QName::new(Namespace::package("flash.media"), "Camera");
+    activation.domain().export_class(camera_qname, camera_class.inner_class_definition(), activation.context.gc_context);
+
+
+    activation.avm2().system_classes.as_mut().unwrap().camera = camera_class;
 }
 
 /// Loads classes from our custom 'playerglobal' (which are written in ActionScript)

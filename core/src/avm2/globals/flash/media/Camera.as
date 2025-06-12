@@ -21,7 +21,6 @@ package flash.media {
         }
 
         public static function getCamera(name:String = null):Camera {
-            __ruffle__.stub_method("flash.media.Camera", "getCamera");
             return null;
         }
 
@@ -76,7 +75,6 @@ package flash.media {
         }
 
         public static function get isSupported():Boolean {
-            __ruffle__.stub_getter("flash.media.Camera", "isSupported");
             return false;
         }
 
@@ -111,8 +109,7 @@ package flash.media {
         }
 
         public static function get names():Array {
-            __ruffle__.stub_getter("flash.media.Camera", "names");
-            return [];
+            return new Array();
         }
 
         public function get quality():int {

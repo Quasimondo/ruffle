@@ -20,6 +20,7 @@ use std::thread::sleep;
 mod environment;
 mod external_interface;
 mod shared_object;
+mod avm2_camera_tests;
 
 const TEST_TOML_NAME: &str = "test.toml";
 
@@ -124,6 +125,9 @@ fn main() {
     }));
     tests.push(Trial::test("external_interface_avm2", || {
         external_interface_avm2(&NativeEnvironment)
+    }));
+    tests.push(Trial::test("camera_api_placeholders", || {
+        avm2_camera_tests::test_camera_api_placeholders()
     }));
 
     tests.sort_unstable_by(|a, b| a.name().cmp(b.name()));
