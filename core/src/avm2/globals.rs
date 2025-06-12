@@ -6,7 +6,7 @@ use crate::avm2::object::{ClassObject, ScriptObject, TObject};
 use crate::avm2::scope::{Scope, ScopeChain};
 use crate::avm2::script::TranslationUnit;
 use crate::avm2::{Avm2, Error, Multiname, Namespace, QName};
-use crate::string::WStr;
+use crate::string::{AvmString, WStr};
 use crate::tag_utils::{self, ControlFlow, SwfMovie, SwfSlice, SwfStream};
 use gc_arena::Collect;
 use std::sync::Arc;

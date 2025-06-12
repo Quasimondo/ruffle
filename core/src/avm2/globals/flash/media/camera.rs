@@ -2,7 +2,8 @@
 
 use crate::avm2::activation::Activation;
 use crate::avm2::error::Error;
-use crate::avm2::object::{ArrayObject, TObject, ClassObject, PrototypeObject};
+use crate::avm2::object::{ArrayObject, TObject, ClassObject}; // PrototypeObject removed
+use crate::avm2::class::PrototypeObject; // PrototypeObject added here
 use crate::avm2::value::Value;
 use crate::avm2::method::Method;
 use crate::avm2::qname::{Namespace, QName};
@@ -10,7 +11,7 @@ use crate::avm2::string::AvmString;
 use crate::avm2::api_version::ApiVersion; // Needed for Namespace::package
 
 #[cfg(target_os = "linux")]
-use v4l::{Device, capability::Flags as CapFlags, error::Error as V4lError};
+use v4l::{Device, capability::Flags as CapFlags, Error as V4lError};
 #[cfg(target_os = "linux")]
 use tracing::{warn, info};
 
