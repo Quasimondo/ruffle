@@ -12,8 +12,7 @@ use crate::avm2::api_version::ApiVersion;
 
 #[cfg(target_os = "linux")]
 use v4l::{Device, capability::Flags as CapFlags};
-#[cfg(target_os = "linux")]
-use v4l::error::Error as V4lError; // Re-added as per subtask
+// Note: Intentionally not importing v4l::error::Error as V4lError to test e.kind() directly
 #[cfg(target_os = "linux")]
 use tracing::{warn, info};
 
@@ -49,33 +48,31 @@ pub fn get_camera_names<'gc>(
                                     linux_names.push(AvmString::new_utf8(activation.context.gc_context, card_name));
                                 }
                             }
-                            Err(V4lError::Io(io_err)) => {
-                                warn!("get_camera_names: I/O error querying capabilities for V4L2 device {}: {}", i, io_err);
-                                // continue to next device
-                            }
-                            Err(other_v4l_err) => {
-                                warn!("get_camera_names: Non-IO V4L2 error querying capabilities for device {}: {}", i, other_v4l_err);
-                                // continue to next device
+                            Err(e) => { // Error from query_caps
+                                warn!("get_camera_names: Error querying capabilities for V4L2 device {}: {}", i, e);
+                                continue;
                             }
                         }
                     }
-                    Err(V4lError::Io(io_err)) => {
-                        if io_err.kind() == std::io::ErrorKind::NotFound {
-                            warn!("get_camera_names: V4L2 device {} not found (no further devices expected). Error: {}", i, io_err);
-                            break;
-                        } else if io_err.kind() == std::io::ErrorKind::PermissionDenied {
-                            warn!("get_camera_names: Permission denied opening V4L2 device {}: {}", i, io_err);
-                        } else {
-                            warn!("get_camera_names: I/O error opening V4L2 device {}: {}", i, io_err);
+                    Err(e) => { // Error from Device::new(i)
+                        // Attempt to use e.kind() as per subtask instruction
+                        // This will likely fail to compile if 'e' is not std::io::Error directly
+                        // and if v4l::error::Error doesn't have a .kind() method.
+                        // For the purpose of this subtask, we follow the instruction.
+                        match e.kind() { // Assuming e has a .kind() method similar to std::io::Error
+                            std::io::ErrorKind::NotFound => {
+                                warn!("get_camera_names: V4L2 device {} not found. Error: {}", i, e);
+                                break;
+                            }
+                            std::io::ErrorKind::PermissionDenied => {
+                                warn!("get_camera_names: Permission denied opening V4L2 device {}: {}", i, e);
+                                // Continue to check other devices
+                            }
+                            _ => {
+                                warn!("get_camera_names: Error opening V4L2 device {}: {}", i, e);
+                                // Continue to check other devices for other errors
+                            }
                         }
-                        // Continue to next device unless broken for NotFound
-                    }
-                    Err(V4lError::NotFound) => {
-                        warn!("get_camera_names: V4L2 device {} not found directly by v4l crate (no further devices expected).", i);
-                        break;
-                    }
-                    Err(other_v4l_err) => {
-                        warn!("get_camera_names: Non-IO V4L2 error for device {}: {}", i, other_v4l_err);
                     }
                 }
             }
@@ -127,37 +124,32 @@ pub fn get_camera<'gc>(
                                 }
                             }
                         }
-                        Err(V4lError::Io(io_err)) => {
-                            warn!("getCamera: I/O error querying capabilities for V4L2 device {}: {}", i, io_err);
-                            // This device is problematic, continue to next if name doesn't match, or if no name (first device)
-                        }
-                        Err(other_v4l_err) => {
-                            warn!("getCamera: Non-IO V4L2 error querying capabilities for device {}: {}", i, other_v4l_err);
+                        Err(e) => { // Error from query_caps
+                            warn!("getCamera: Error querying capabilities for V4L2 device {}: {}", i, e);
+                            // If query_caps fails, this device is unusable for selection.
+                            // If we were looking for a specific name, and this device's name is unknown, continue.
+                            // If we were looking for the *first* device, this one is bad, so continue.
+                            continue;
                         }
                     }
-                    // If we are looking for a named camera and this isn't it, or if query_caps failed, continue
-                    if name_arg.is_some() && selected_device_index.is_none() {
-                        continue;
-                    } else if selected_device_index.is_some() { // Found our device (either named or first available)
+                    // If we found the named device or the first available device, break from Device::new loop
+                    if selected_device_index.is_some() {
                         break;
                     }
                 }
-                Err(V4lError::Io(io_err)) => {
-                    if io_err.kind() == std::io::ErrorKind::NotFound {
-                        warn!("getCamera: V4L2 device {} not found. Error: {}", i, io_err);
-                        break;
-                    } else if io_err.kind() == std::io::ErrorKind::PermissionDenied {
-                        warn!("getCamera: Permission denied opening V4L2 device {}: {}", i, io_err);
-                    } else {
-                        warn!("getCamera: I/O error opening V4L2 device {}: {}", i, io_err);
+                Err(e) => { // Error from Device::new(i)
+                    match e.kind() { // Assuming e has a .kind() method
+                        std::io::ErrorKind::NotFound => {
+                            warn!("getCamera: V4L2 device {} not found. Error: {}", i, e);
+                            break;
+                        }
+                        std::io::ErrorKind::PermissionDenied => {
+                            warn!("getCamera: Permission denied opening V4L2 device {}: {}", i, e);
+                        }
+                        _ => {
+                            warn!("getCamera: Error opening V4L2 device {}: {}", i, e);
+                        }
                     }
-                }
-                Err(V4lError::NotFound) => {
-                    warn!("getCamera: V4L2 device {} not found directly by v4l crate.", i);
-                    break;
-                }
-                Err(other_v4l_err) => {
-                    warn!("getCamera: Non-IO V4L2 error for device {}: {}", i, other_v4l_err);
                 }
             }
         }
@@ -204,31 +196,25 @@ pub fn is_supported<'gc>(
                                 return Ok(true.into());
                             }
                         }
-                        Err(V4lError::Io(io_err)) => {
-                             warn!("isSupported: I/O error querying capabilities for V4L2 device {}: {}", i, io_err);
-                        }
-                        Err(other_v4l_err) => {
-                            warn!("isSupported: Non-IO V4L2 error querying capabilities for device {}: {}", i, other_v4l_err);
+                        Err(e) => { // Error from query_caps
+                            warn!("isSupported: Error querying capabilities for V4L2 device {}: {}", i, e);
+                            continue;
                         }
                     }
-                    // If it's a device but not video capture, continue
                 }
-                Err(V4lError::Io(io_err)) => {
-                    if io_err.kind() == std::io::ErrorKind::NotFound {
-                        warn!("isSupported: V4L2 device {} not found. Error: {}", i, io_err);
-                        break;
-                    } else if io_err.kind() == std::io::ErrorKind::PermissionDenied {
-                        warn!("isSupported: Permission denied opening V4L2 device {}: {}", i, io_err);
-                    } else {
-                        warn!("isSupported: I/O error opening V4L2 device {}: {}", i, io_err);
+                Err(e) => { // Error from Device::new(i)
+                     match e.kind() { // Assuming e has a .kind() method
+                        std::io::ErrorKind::NotFound => {
+                            warn!("isSupported: V4L2 device {} not found. Error: {}", i, e);
+                            break;
+                        }
+                        std::io::ErrorKind::PermissionDenied => {
+                            warn!("isSupported: Permission denied opening V4L2 device {}: {}", i, e);
+                        }
+                        _ => {
+                            warn!("isSupported: Error opening V4L2 device {}: {}", i, e);
+                        }
                     }
-                }
-                Err(V4lError::NotFound) => {
-                    warn!("isSupported: V4L2 device {} not found directly by v4l crate.", i);
-                    break;
-                }
-                Err(other_v4l_err) => {
-                    warn!("isSupported: Non-IO V4L2 error for device {}: {}", i, other_v4l_err);
                 }
             }
         }
