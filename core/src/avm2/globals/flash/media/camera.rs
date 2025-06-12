@@ -2,18 +2,18 @@
 
 use crate::avm2::activation::Activation;
 use crate::avm2::error::Error;
-use crate::avm2::object::{ArrayObject, TObject, ClassObject}; // PrototypeObject removed
-use crate::avm2::class::PrototypeObject; // PrototypeObject added here
+use crate::avm2::object::{ArrayObject, TObject, ClassObject};
+use crate::avm2::class::PrototypeObject;
 use crate::avm2::value::Value;
 use crate::avm2::method::Method;
 use crate::avm2::qname::{Namespace, QName};
 use crate::avm2::string::AvmString;
-use crate::avm2::api_version::ApiVersion; // Needed for Namespace::package
+use crate::avm2::api_version::ApiVersion;
 
 #[cfg(target_os = "linux")]
 use v4l::{Device, capability::Flags as CapFlags};
 #[cfg(target_os = "linux")]
-use v4l::error::Error as V4lError;
+use v4l::error::Error as V4lError; // Re-added as per subtask
 #[cfg(target_os = "linux")]
 use tracing::{warn, info};
 
@@ -21,12 +21,9 @@ use tracing::{warn, info};
 /// Placeholder for the Camera constructor (instance allocator)
 pub fn camera_constructor<'gc>(
     activation: &mut Activation<'_, 'gc>,
-    _this: Value<'gc>, // This is the TObject instance
+    _this: Value<'gc>,
     _args: &[Value<'gc>],
 ) -> Result<Value<'gc>, Error<'gc>> {
-    // TODO: Actual instance initialization if needed.
-    // For now, EventDispatcher's constructor does most of the work.
-    // If CameraObject needs specific native data, initialize it here.
     Ok(Value::Undefined)
 }
 
@@ -52,23 +49,33 @@ pub fn get_camera_names<'gc>(
                                     linux_names.push(AvmString::new_utf8(activation.context.gc_context, card_name));
                                 }
                             }
-                            Err(e) => {
-                                warn!("get_camera_names: Failed to query capabilities for V4L2 device {}: {}", i, e);
+                            Err(V4lError::Io(io_err)) => {
+                                warn!("get_camera_names: I/O error querying capabilities for V4L2 device {}: {}", i, io_err);
+                                // continue to next device
+                            }
+                            Err(other_v4l_err) => {
+                                warn!("get_camera_names: Non-IO V4L2 error querying capabilities for device {}: {}", i, other_v4l_err);
+                                // continue to next device
                             }
                         }
                     }
-                    Err(V4lError::NotFound) => break,
                     Err(V4lError::Io(io_err)) => {
                         if io_err.kind() == std::io::ErrorKind::NotFound {
+                            warn!("get_camera_names: V4L2 device {} not found (no further devices expected). Error: {}", i, io_err);
                             break;
                         } else if io_err.kind() == std::io::ErrorKind::PermissionDenied {
                             warn!("get_camera_names: Permission denied opening V4L2 device {}: {}", i, io_err);
                         } else {
                             warn!("get_camera_names: I/O error opening V4L2 device {}: {}", i, io_err);
                         }
+                        // Continue to next device unless broken for NotFound
                     }
-                    Err(e) => {
-                        warn!("get_camera_names: Non-I/O error opening V4L2 device {}: {}", i, e);
+                    Err(V4lError::NotFound) => {
+                        warn!("get_camera_names: V4L2 device {} not found directly by v4l crate (no further devices expected).", i);
+                        break;
+                    }
+                    Err(other_v4l_err) => {
+                        warn!("get_camera_names: Non-IO V4L2 error for device {}: {}", i, other_v4l_err);
                     }
                 }
             }
@@ -84,7 +91,6 @@ pub fn get_camera_names<'gc>(
     for name_val in names_vec {
         avm_array_elements.push(Value::String(name_val));
     }
-    // Corrected ArrayObject creation
     let array = ArrayObject::from_values(activation, &avm_array_elements)?;
     Ok(Value::Object(array.into()))
 }
@@ -97,7 +103,6 @@ pub fn get_camera<'gc>(
 ) -> Result<Value<'gc>, Error<'gc>> {
     #[cfg(target_os = "linux")]
     {
-        // Corrected string coercion
         let name_arg: Option<AvmString<'gc>> = args.get(0).and_then(|v| v.coerce_to_string(activation).ok());
         let mut selected_device_index: Option<u32> = None;
 
@@ -122,14 +127,24 @@ pub fn get_camera<'gc>(
                                 }
                             }
                         }
-                        Err(e) => {
-                            warn!("getCamera: Failed to query capabilities for V4L2 device {}: {}", i, e);
+                        Err(V4lError::Io(io_err)) => {
+                            warn!("getCamera: I/O error querying capabilities for V4L2 device {}: {}", i, io_err);
+                            // This device is problematic, continue to next if name doesn't match, or if no name (first device)
+                        }
+                        Err(other_v4l_err) => {
+                            warn!("getCamera: Non-IO V4L2 error querying capabilities for device {}: {}", i, other_v4l_err);
                         }
                     }
+                    // If we are looking for a named camera and this isn't it, or if query_caps failed, continue
+                    if name_arg.is_some() && selected_device_index.is_none() {
+                        continue;
+                    } else if selected_device_index.is_some() { // Found our device (either named or first available)
+                        break;
+                    }
                 }
-                Err(V4lError::NotFound) => break,
                 Err(V4lError::Io(io_err)) => {
                     if io_err.kind() == std::io::ErrorKind::NotFound {
+                        warn!("getCamera: V4L2 device {} not found. Error: {}", i, io_err);
                         break;
                     } else if io_err.kind() == std::io::ErrorKind::PermissionDenied {
                         warn!("getCamera: Permission denied opening V4L2 device {}: {}", i, io_err);
@@ -137,8 +152,12 @@ pub fn get_camera<'gc>(
                         warn!("getCamera: I/O error opening V4L2 device {}: {}", i, io_err);
                     }
                 }
-                Err(e) => {
-                    warn!("getCamera: Non-I/O error opening V4L2 device {}: {}", i, e);
+                Err(V4lError::NotFound) => {
+                    warn!("getCamera: V4L2 device {} not found directly by v4l crate.", i);
+                    break;
+                }
+                Err(other_v4l_err) => {
+                    warn!("getCamera: Non-IO V4L2 error for device {}: {}", i, other_v4l_err);
                 }
             }
         }
@@ -182,17 +201,21 @@ pub fn is_supported<'gc>(
                     match device.query_caps() {
                         Ok(caps) => {
                             if caps.capabilities.contains(CapFlags::VIDEO_CAPTURE) {
-                                return Ok(true.into()); // Corrected Value construction
+                                return Ok(true.into());
                             }
                         }
-                        Err(e) => {
-                            warn!("isSupported: Failed to query capabilities for V4L2 device {}: {}", i, e);
+                        Err(V4lError::Io(io_err)) => {
+                             warn!("isSupported: I/O error querying capabilities for V4L2 device {}: {}", i, io_err);
+                        }
+                        Err(other_v4l_err) => {
+                            warn!("isSupported: Non-IO V4L2 error querying capabilities for device {}: {}", i, other_v4l_err);
                         }
                     }
+                    // If it's a device but not video capture, continue
                 }
-                Err(V4lError::NotFound) => break,
                 Err(V4lError::Io(io_err)) => {
                     if io_err.kind() == std::io::ErrorKind::NotFound {
+                        warn!("isSupported: V4L2 device {} not found. Error: {}", i, io_err);
                         break;
                     } else if io_err.kind() == std::io::ErrorKind::PermissionDenied {
                         warn!("isSupported: Permission denied opening V4L2 device {}: {}", i, io_err);
@@ -200,16 +223,20 @@ pub fn is_supported<'gc>(
                         warn!("isSupported: I/O error opening V4L2 device {}: {}", i, io_err);
                     }
                 }
-                Err(e) => {
-                    warn!("isSupported: Non-I/O error opening V4L2 device {}: {}", i, e);
+                Err(V4lError::NotFound) => {
+                    warn!("isSupported: V4L2 device {} not found directly by v4l crate.", i);
+                    break;
+                }
+                Err(other_v4l_err) => {
+                    warn!("isSupported: Non-IO V4L2 error for device {}: {}", i, other_v4l_err);
                 }
             }
         }
-        Ok(false.into()) // Corrected Value construction
+        Ok(false.into())
     }
     #[cfg(not(target_os = "linux"))]
     {
-        Ok(false.into()) // Corrected Value construction
+        Ok(false.into())
     }
 }
 
@@ -226,9 +253,9 @@ pub fn create_class<'gc>(activation: &mut Activation<'_, 'gc>) -> Result<ClassOb
     let class_gc_cell = crate::avm2::class::Class::new(
         qname,
         Some(activation.avm2().classes().eventdispatcher),
-        camera_constructor, // NativeMethodImpl for instance allocator
-        None, // instance_call_handler
-        None, // class_call_handler
+        camera_constructor,
+        None,
+        None,
         mc
     );
 
@@ -244,16 +271,14 @@ pub fn create_class<'gc>(activation: &mut Activation<'_, 'gc>) -> Result<ClassOb
         proto
     )?;
 
-    // Bind static getter `names`
     let names_method = Method::from_builtin_static_getter_and_params(get_camera_names, "names", Vec::new(), mc, None);
     class_object.define_class_trait(
         mc,
-        QName::new(Namespace::public_namespace(activation.context.gc_context), AvmString::new_utf8(mc, "names")), // Ensure public_namespace gets mc
+        QName::new(Namespace::public_namespace(activation.context.gc_context), AvmString::new_utf8(mc, "names")),
         names_method.into(),
         activation,
     )?;
 
-    // Bind static method `getCamera`
     let get_camera_method = Method::from_builtin_and_params(get_camera, "getCamera", Vec::new(), mc, None);
     class_object.define_class_trait(
         mc,
@@ -262,7 +287,6 @@ pub fn create_class<'gc>(activation: &mut Activation<'_, 'gc>) -> Result<ClassOb
         activation,
     )?;
 
-    // Bind static getter `isSupported`
     let is_supported_method = Method::from_builtin_static_getter_and_params(is_supported, "isSupported", Vec::new(), mc, None);
     class_object.define_class_trait(
         mc,
