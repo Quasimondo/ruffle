@@ -3,10 +3,10 @@
 use crate::avm2::activation::Activation;
 use crate::avm2::error::Error;
 use crate::avm2::object::{ArrayObject, TObject, ClassObject};
-use crate::avm2::class::PrototypeObject;
 use crate::avm2::value::Value;
 use crate::avm2::method::Method;
-use crate::avm2::qname::{Namespace, QName};
+use crate::avm2::qname::QName;
+use crate::avm2::Namespace;
 use crate::avm2::string::AvmString;
 use crate::avm2::api_version::ApiVersion;
 
@@ -245,18 +245,14 @@ pub fn create_class<'gc>(activation: &mut Activation<'_, 'gc>) -> Result<ClassOb
         mc
     );
 
-    let proto = PrototypeObject::derive_prototype_from_base(
+    // Use ClassObject::from_class - this handles prototype creation automatically
+    let class_object = ClassObject::from_class(
         activation,
         class_gc_cell,
-        activation.avm2().prototypes().eventdispatcher
+        Some(activation.avm2().classes().eventdispatcher) // superclass_object
     )?;
 
-    let class_object = ClassObject::from_class_and_prototype(
-        activation,
-        class_gc_cell,
-        proto
-    )?;
-
+    // Bind static getter `names`
     let names_method = Method::from_builtin_static_getter_and_params(get_camera_names, "names", Vec::new(), mc, None);
     class_object.define_class_trait(
         mc,
@@ -265,6 +261,7 @@ pub fn create_class<'gc>(activation: &mut Activation<'_, 'gc>) -> Result<ClassOb
         activation,
     )?;
 
+    // Bind static method `getCamera`
     let get_camera_method = Method::from_builtin_and_params(get_camera, "getCamera", Vec::new(), mc, None);
     class_object.define_class_trait(
         mc,
@@ -273,6 +270,7 @@ pub fn create_class<'gc>(activation: &mut Activation<'_, 'gc>) -> Result<ClassOb
         activation,
     )?;
 
+    // Bind static getter `isSupported`
     let is_supported_method = Method::from_builtin_static_getter_and_params(is_supported, "isSupported", Vec::new(), mc, None);
     class_object.define_class_trait(
         mc,
